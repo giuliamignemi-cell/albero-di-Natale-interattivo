@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gioco a Squadre - Cronometri</title>
+    <!-- Caricamento di Tailwind CSS per uno styling moderno e reattivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* Stili personalizzati per la visibilità e il font */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .timer-display {
+            font-size: 2.5rem; /* Grande su desktop */
+        }
+        @media (max-width: 640px) {
+            .timer-display {
+                font-size: 1.8rem; /* Ridotto su mobile */
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div id="app" class="w-full max-w-4xl">
+        <h1 class="text-3xl font-bold text-gray-800 text-center mb-6 md:text-4xl">
+            GIOCO A SQUADRE
+        </h1>
+
+        <!-- Controlli Principali -->
+        <div class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mb-8">
+            <button id="startButton" onclick="startAllTimers()" class="px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-300 disabled:opacity-50 text-lg">
+                AVVIA TUTTI I CRONOMETRI
+            </button>
+            <button id="resetButton" onclick="resetApp()" class="px-6 py-3 bg-red-600 text-white font-bold rounded-lg shadow-lg hover:bg-red-700 transition duration-300 disabled:opacity-50 text-lg" disabled>
+                RESET
+            </button>
+        </div>
+
+        <!-- Classifica (Inizialmente nascosta) -->
+        <div id="rankingContainer" class="hidden bg-yellow-100 p-4 border-l-4 border-yellow-500 text-yellow-800 rounded-lg mb-8 shadow-md">
+            <h2 class="text-xl font-bold mb-2">Classifica Veloce:</h2>
+            <ul id="rankingList">
+                <!-- La classifica sarà popolata qui da JavaScript -->
+            </ul>
+        </div>
+
+        <!-- Griglia dei Cronometri - Aggiornata a 3 colonne su schermi grandi -->
+        <div id="timersGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6 lg:grid-cols-3">
+            <!-- I cronometri verranno generati qui da JavaScript -->
+        </div>
+
+    </div>
+
+<script>
+    // Configurazione delle squadre (aggiunta la squadra Rossa)
+    const teams = [
+        { name: "Rossa", color: "red-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-rossa' }, // Nuova squadra Rossa
+        { name: "Rosa", color: "pink-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-rosa' },
+        { name: "Azzurra", color: "blue-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-azzurra' },
+        { name: "Gialla", color: "yellow-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-gialla' },
+        { name: "Verde", color: "green-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-verde' },
+        { name: "Viola", color: "purple-500", running: false, startTime: 0, elapsed: 0, finalTime: null, elementId: 'timer-viola' },
+    ];
+
+    let animationFrameId = null;
+    let globalStartTime = 0;
+    let isGameRunning = false;
+    let stoppedCount = 0;
+    const totalTeams = teams.length; // Aggiornato a 6 squadre
+
+    // --- Utility per la formattazione del tempo ---
+
+    /**
+     * Formatta i millisecondi in una stringa MM:SS:ms (centisecondi).
+     * @param {number} ms - Tempo in millisecondi.
+     * @returns {string} Tempo formattato.
+     */
+    function formatTime(ms) {
+        // Garantisce che il tempo non sia negativo
+        if (ms < 0) ms = 0;
+
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const centiseconds = Math.floor((ms % 1000) / 10); // Display centiseconds
+
+        const pad = (num) => String(num).padStart(2, '0');
+
+        return `${pad(minutes)}:${pad(seconds)}:${pad(centiseconds)}`;
+    }
+
+    // --- Funzioni di Rendering e Setup ---
+
+    /**
+     * Genera il markup HTML per una singola card del cronometro.
+     * @param {Object} team - L'oggetto squadra.
+     * @returns {string} Markup HTML.
+     */
+    function createTimerCard(team) {
+        return `
+            <div id="${team.elementId}" class="bg-white p-6 rounded-xl shadow-xl border-t-8 border-${team.color} transition duration-500">
+                <h2 class="text-2xl font-extrabold mb-4 text-${team.color}">${team.name.toUpperCase()}</h2>
+                
+                <!-- Display principale del tempo -->
+                <div class="timer-display font-mono font-bold mb-4 text-gray-900">
+                    00:00:00
+                </div>
+
+                <!-- Bottone STOP -->
+                <button 
+                    id="stop-${team.elementId}" 
+                    onclick="stopTimer('${team.name}')" 
+                    class="w-full py-3 bg-${team.color} text-white font-bold rounded-lg shadow-md hover:opacity-90 transition duration-300 disabled:bg-gray-400 disabled:cursor-not-allowed text-lg"
+                    disabled
+                >
+                    STOP
+                </button>
+
+                <!-- Messaggio di Fine -->
+                <p id="message-${team.elementId}" class="mt-3 text-lg font-semibold text-center text-${team.color} hidden">
+                    Finito in <span class="font-bold"></span>
+                </p>
+            </div>
+        `;
+    }
+
+    /**
+     * Inizializza l'interfaccia utente aggiungendo tutte le card dei timer.
+     */
+    function initializeUI() {
+        const grid = document.getElementById('timersGrid');
+        grid.innerHTML = teams.map(createTimerCard).join('');
+    }
+
+    // --- Logica del Cronometro ---
+
+    /**
+     * Aggiorna lo stato di tutti i cronometri attivi.
+     * @param {number} timestamp - Tempo attuale fornito da requestAnimationFrame.
+     */
+    function updateTimers(timestamp) {
+        if (!isGameRunning) return;
+
+        const now = timestamp || performance.now();
+        
+        teams.forEach(team => {
+            if (team.running) {
+                // Calcola il tempo trascorso
+                team.elapsed = now - team.startTime;
+                
+                // Aggiorna la visualizzazione
+                const timerElement = document.getElementById(team.elementId).querySelector('.timer-display');
+                if (timerElement) {
+                    timerElement.textContent = formatTime(team.elapsed);
+                }
+            }
+        });
+
+        // Richiama la funzione per il frame successivo
+        animationFrameId = requestAnimationFrame(updateTimers);
+    }
+
+    /**
+     * Avvia tutti i cronometri contemporaneamente.
+     */
+    function startAllTimers() {
+        if (isGameRunning) return; // Impedisce doppi avviamenti
+        
+        // Imposta l'ora di inizio globale
+        globalStartTime = performance.now();
+        isGameRunning = true;
+        stoppedCount = 0;
+
+        // Abilita il cronometro e imposta l'ora di inizio per ogni squadra
+        teams.forEach(team => {
+            team.running = true;
+            team.startTime = globalStartTime;
+            
+            // Abilita il bottone STOP
+            const stopButton = document.getElementById(`stop-${team.elementId}`);
+            if (stopButton) {
+                stopButton.disabled = false;
+                stopButton.textContent = 'STOP';
+                stopButton.classList.remove('bg-gray-400'); // Rimuove lo stile disabilitato
+            }
+        });
+
+        // Avvia il ciclo di animazione
+        animationFrameId = requestAnimationFrame(updateTimers);
+
+        // Disabilita il bottone di avvio e abilita il reset
+        document.getElementById('startButton').disabled = true;
+        document.getElementById('resetButton').disabled = false;
+        document.getElementById('rankingContainer').classList.add('hidden'); // Nasconde la classifica
+    }
+
+    /**
+     * Blocca il cronometro per una squadra specifica.
+     * @param {string} teamName - Il nome della squadra.
+     */
+    function stopTimer(teamName) {
+        const team = teams.find(t => t.name === teamName);
+        if (!team || !team.running) return;
+
+        // Blocca l'esecuzione
+        team.running = false;
+        
+        // Calcola il tempo finale (arrotondato per la visualizzazione)
+        team.finalTime = team.elapsed;
+        
+        stoppedCount++;
+
+        // Aggiorna l'interfaccia utente
+        const stopButton = document.getElementById(`stop-${team.elementId}`);
+        const message = document.getElementById(`message-${team.elementId}`);
+        const display = document.getElementById(team.elementId).querySelector('.timer-display');
+        
+        // Aggiorna il display per mostrare l'ora esatta di stop
+        display.textContent = formatTime(team.finalTime);
+
+        // Disabilita il bottone STOP e mostra il risultato
+        if (stopButton) {
+            stopButton.disabled = true;
+            stopButton.textContent = 'TEMPO REGISTRATO!';
+            stopButton.classList.add('bg-gray-400', 'cursor-default');
+        }
+        if (message) {
+            message.querySelector('span').textContent = formatTime(team.finalTime);
+            message.classList.remove('hidden');
+        }
+
+        // Se tutte le squadre hanno finito, blocca il ciclo globale e mostra la classifica
+        if (stoppedCount === totalTeams) {
+            cancelAnimationFrame(animationFrameId);
+            isGameRunning = false;
+            displayRanking();
+        }
+    }
+
+    /**
+     * Calcola e mostra la classifica delle squadre.
+     */
+    function displayRanking() {
+        const rankingList = document.getElementById('rankingList');
+        const rankingContainer = document.getElementById('rankingContainer');
+        
+        // Filtra solo i team che hanno un tempo finale e li ordina
+        const finishedTeams = teams
+            .filter(t => t.finalTime !== null)
+            .sort((a, b) => a.finalTime - b.finalTime);
+
+        rankingList.innerHTML = ''; // Pulisce la lista
+
+        if (finishedTeams.length > 0) {
+            finishedTeams.forEach((team, index) => {
+                const rank = index + 1;
+                const timeStr = formatTime(team.finalTime);
+                
+                // Determinazione dello stile per il podio
+                let rankClass = 'text-gray-800';
+                if (rank === 1) rankClass = 'text-2xl text-yellow-600 font-extrabold';
+                else if (rank === 2) rankClass = 'text-xl text-gray-500 font-bold';
+                else if (rank === 3) rankClass = 'text-lg text-amber-900 font-semibold';
+
+                const listItem = document.createElement('li');
+                listItem.className = `p-1 ${rankClass}`;
+                listItem.innerHTML = `
+                    #${rank} ${team.name.toUpperCase()}: <span class="font-mono">${timeStr}</span>
+                `;
+                rankingList.appendChild(listItem);
+            });
+            rankingContainer.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Resetta l'intera applicazione allo stato iniziale.
+     */
+    function resetApp() {
+        // Blocca qualsiasi animazione in corso
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+        isGameRunning = false;
+        stoppedCount = 0;
+        
+        // Resetta lo stato di tutte le squadre
+        teams.forEach(team => {
+            team.running = false;
+            team.startTime = 0;
+            team.elapsed = 0;
+            team.finalTime = null;
+
+            // Aggiorna l'interfaccia utente
+            const display = document.getElementById(team.elementId).querySelector('.timer-display');
+            display.textContent = '00:00:00';
+            
+            const stopButton = document.getElementById(`stop-${team.elementId}`);
+            stopButton.disabled = true;
+            stopButton.textContent = 'STOP';
+            stopButton.classList.remove('bg-gray-400', 'cursor-default');
+            
+            const message = document.getElementById(`message-${team.elementId}`);
+            message.classList.add('hidden');
+        });
+
+        // Resetta i bottoni principali
+        document.getElementById('startButton').disabled = false;
+        document.getElementById('resetButton').disabled = true;
+        document.getElementById('rankingContainer').classList.add('hidden');
+    }
+
+    // Inizializza l'app quando la finestra è completamente caricata
+    window.onload = initializeUI;
+</script>
+
+</body>
+</html>
